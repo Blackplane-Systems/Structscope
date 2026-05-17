@@ -23,6 +23,7 @@ def run_integration():
 
         platforms = rpc({"method": "platforms"})
         assert "platforms" in platforms and "x86_64" in platforms["platforms"]
+        assert "x86_64_windows" in platforms["platforms"]
 
         detected = rpc({"method": "detect_platform"})
         assert detected["platform"] in platforms["platforms"], detected
@@ -60,6 +61,7 @@ def run_integration():
         assert auto["platform"] in platforms["platforms"], auto
         assert auto["requested_platform"] == "auto", auto
         assert auto["structs"][0]["analysis"]["rules"] is not None
+        assert auto["source_model"]["preprocessor"] is False
 
         comparison = rpc(
             {

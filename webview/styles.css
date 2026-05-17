@@ -19,6 +19,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--vscode-panel-border);
@@ -210,6 +211,15 @@ select {
 .insights-header {
   margin-bottom: 8px;
   font-weight: 600;
+}
+
+.incomplete-banner {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-editorWarning-foreground);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 12%, transparent);
+  color: var(--vscode-editor-foreground);
+  border-radius: 4px;
 }
 
 .insight-card {

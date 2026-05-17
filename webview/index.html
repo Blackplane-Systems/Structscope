@@ -10,15 +10,19 @@
 <body>
   <header class="top-bar">
     <h1>StructScope</h1>
+    <button id="analyze-active" type="button" title="Analyze the active editor">Analyze</button>
     <label class="control">
       <span>Platform</span>
       <select id="platform" aria-label="ABI platform">
         <option value="auto">Auto detect host</option>
-        <option value="x86_64" selected>x86_64</option>
-        <option value="arm64">arm64</option>
+        <option value="x86_64" selected>x86_64 SysV LP64</option>
+        <option value="x86_64_windows">x86_64 Windows LLP64</option>
+        <option value="arm64">arm64 LP64</option>
+        <option value="arm64_windows">arm64 Windows LLP64</option>
         <option value="arm32">arm32</option>
         <option value="avr">avr</option>
         <option value="riscv32">riscv32</option>
+        <option value="riscv64">riscv64</option>
       </select>
     </label>
     <button id="detect-platform" type="button" class="secondary-button" title="Detect host ABI">Detect</button>

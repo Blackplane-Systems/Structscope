@@ -31,3 +31,13 @@ def test_rust_struct_parses_field_names_and_types():
         ("value", "f64"),
         ("state", "u8"),
     ]
+
+
+def test_rust_common_primitives_include_char_and_128_bit_integers():
+    structs = parse_structs_rust("struct Wide { marker: char, value: u128, signed: i128 }")
+    wide = structs[0]
+    fields = {field["name"]: field for field in wide["fields"]}
+    assert fields["marker"]["size"] == 4
+    assert fields["marker"]["alignment"] == 4
+    assert fields["value"]["size"] == 16
+    assert fields["signed"]["size"] == 16

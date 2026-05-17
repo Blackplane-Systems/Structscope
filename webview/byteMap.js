@@ -27,6 +27,7 @@ window.structscope = {
 
 const els = {
   platform: document.getElementById('platform'),
+  analyzeActive: document.getElementById('analyze-active'),
   detectPlatform: document.getElementById('detect-platform'),
   copyJson: document.getElementById('copy-json'),
   copyReport: document.getElementById('copy-report'),
@@ -71,6 +72,12 @@ window.addEventListener('message', (event) => {
 if (els.platform) {
   els.platform.addEventListener('change', () => {
     vscode.postMessage({ type: 'platform-change', platform: els.platform.value });
+  });
+}
+
+if (els.analyzeActive) {
+  els.analyzeActive.addEventListener('click', () => {
+    vscode.postMessage({ type: 'analyze-active' });
   });
 }
 
@@ -319,6 +326,13 @@ function renderInsights(structData, insightsEl) {
   header.className = 'insights-header';
   header.textContent = `Layout grade ${analysis.layout_grade || 'N/A'} - score ${analysis.layout_score ?? 'N/A'}/100`;
   insightsEl.appendChild(header);
+
+  if (analysis.layout_complete === false || (analysis.blockers || []).length) {
+    const incomplete = document.createElement('div');
+    incomplete.className = 'incomplete-banner';
+    incomplete.textContent = 'Layout is incomplete. Unresolved types or compiler-specific bit-fields prevent authoritative offsets.';
+    insightsEl.appendChild(incomplete);
+  }
 
   const rules = analysis.rules || [];
   if (!rules.length) {

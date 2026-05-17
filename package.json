@@ -2,7 +2,7 @@
   "name": "struct-scope",
   "displayName": "Struct Scope",
   "publisher": "BlackplaneSystems",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Visualize C, C++, and Rust struct memory layout, padding, cache-line splits, and reorder suggestions.",
   "author": {
     "name": "Brahadeesh V Ra",
@@ -37,19 +37,28 @@
     "commands": [
       {
         "command": "structscope.analyzeStruct",
-        "title": "StructScope: Analyze Struct"
+        "title": "StructScope: Analyze Struct",
+        "icon": "$(play)"
       },
       {
         "command": "structscope.openPanel",
-        "title": "StructScope: Open Dashboard"
+        "title": "StructScope: Open Dashboard",
+        "icon": "$(layout-panel)"
+      },
+      {
+        "command": "structscope.runCliInTerminal",
+        "title": "StructScope: Run CLI in Terminal",
+        "icon": "$(terminal)"
       },
       {
         "command": "structscope.copyAnalysisJson",
-        "title": "StructScope: Copy Last Analysis JSON"
+        "title": "StructScope: Copy Last Analysis JSON",
+        "icon": "$(copy)"
       },
       {
         "command": "structscope.showOutput",
-        "title": "StructScope: Show Output Log"
+        "title": "StructScope: Show Output Log",
+        "icon": "$(output)"
       }
     ],
     "menus": {
@@ -57,12 +66,27 @@
         {
           "command": "structscope.analyzeStruct",
           "when": "resourceLangId == c || resourceLangId == cpp || resourceLangId == rust",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "structscope.openPanel",
+          "when": "resourceLangId == c || resourceLangId == cpp || resourceLangId == rust",
+          "group": "navigation@2"
+        },
+        {
+          "command": "structscope.runCliInTerminal",
+          "when": "resourceLangId == c || resourceLangId == cpp || resourceLangId == rust",
+          "group": "navigation@3"
         }
       ],
       "editor/context": [
         {
           "command": "structscope.analyzeStruct",
+          "when": "resourceLangId == c || resourceLangId == cpp || resourceLangId == rust",
+          "group": "navigation"
+        },
+        {
+          "command": "structscope.runCliInTerminal",
           "when": "resourceLangId == c || resourceLangId == cpp || resourceLangId == rust",
           "group": "navigation"
         }
@@ -75,6 +99,11 @@
         },
         {
           "command": "structscope.openPanel",
+          "when": "view == structscope.dashboard",
+          "group": "navigation"
+        },
+        {
+          "command": "structscope.runCliInTerminal",
           "when": "view == structscope.dashboard",
           "group": "navigation"
         }
@@ -118,12 +147,15 @@
           "enum": [
             "auto",
             "x86_64",
+            "x86_64_windows",
             "arm64",
+            "arm64_windows",
             "arm32",
             "avr",
-            "riscv32"
+            "riscv32",
+            "riscv64"
           ],
-          "description": "Default ABI platform. Use auto to detect the local host ABI."
+          "description": "Default ABI platform. Use auto to detect the host Python ABI; select an explicit platform for cross-compilers."
         },
         "structscope.cacheLine": {
           "type": "number",
@@ -149,6 +181,18 @@
           "type": "boolean",
           "default": true,
           "description": "Show the StructScope status bar command."
+        },
+        "structscope.allowIncompleteLayouts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow non-authoritative partial results for unresolved types or bit-fields. Exact analysis fails fast when disabled."
+        },
+        "structscope.requestTimeoutMs": {
+          "type": "number",
+          "default": 15000,
+          "minimum": 1000,
+          "maximum": 120000,
+          "description": "Timeout in milliseconds for each Python backend request."
         }
       }
     }

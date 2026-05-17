@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from server import analyse_source, compare_platforms
+from platforms import PLATFORMS
 
 
 EXTENSION_LANGUAGE = {
@@ -36,13 +37,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Analyze C, C++, or Rust struct layout locally.")
     parser.add_argument("file", type=Path, help="Source file to analyze")
     parser.add_argument("--language", choices=["c", "cpp", "rust"], help="Override language detection")
-    parser.add_argument("--platform", default="auto", help="ABI platform: auto, x86_64, arm64, arm32, avr, riscv32")
+    parser.add_argument("--platform", default="auto", help=f"ABI platform: auto or one of {', '.join(sorted(PLATFORMS))}")
     parser.add_argument("--cache-line", type=int, default=64, help="Cache-line size in bytes")
     parser.add_argument("--struct", dest="struct_name", help="Print only one struct by name")
     parser.add_argument("--json", action="store_true", help="Emit full JSON instead of a compact table")
     parser.add_argument("--compare", nargs="*", help="Compare platforms. With no names, compares all platforms.")
     parser.add_argument("--rules-only", action="store_true", help="Print only rule-based guidance")
     parser.add_argument("--markdown", action="store_true", help="Emit a Markdown report")
+    parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Return non-authoritative partial layouts for unresolved types or bit-fields instead of failing fast.",
+    )
     return parser
 
 
@@ -146,7 +152,11 @@ def main(argv: list[str] | None = None) -> int:
     language = infer_language(source_path, args.language)
     if args.compare is not None:
         platforms = args.compare if args.compare else None
-        result = compare_platforms(source, language, platforms, args.cache_line)
+        try:
+            result = compare_platforms(source, language, platforms, args.cache_line, args.allow_incomplete)
+        except ValueError as exc:
+            print(f"StructScope error: {exc}", file=sys.stderr)
+            return 2
         if args.json:
             json.dump(result, sys.stdout, indent=2)
             print()
@@ -154,7 +164,11 @@ def main(argv: list[str] | None = None) -> int:
             print_compare(result, args.struct_name)
         return 0
 
-    result = analyse_source(source, language, args.platform, args.cache_line)
+    try:
+        result = analyse_source(source, language, args.platform, args.cache_line, args.allow_incomplete)
+    except ValueError as exc:
+        print(f"StructScope error: {exc}", file=sys.stderr)
+        return 2
     if args.json:
         if args.struct_name:
             result = {

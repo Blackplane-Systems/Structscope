@@ -16,6 +16,7 @@ from platforms import PLATFORMS
 X86_64 = PLATFORMS["x86_64"]
 RUST_PRIMITIVES: dict[str, tuple[int, int]] = {
     "bool": (1, 1),
+    "char": (4, 4),
     "i8": (1, 1),
     "u8": (1, 1),
     "i16": (2, 2),
@@ -28,6 +29,8 @@ RUST_PRIMITIVES: dict[str, tuple[int, int]] = {
     "f64": (8, 8),
     "usize": (8, 8),
     "isize": (8, 8),
+    "i128": (16, 16),
+    "u128": (16, 16),
 }
 
 

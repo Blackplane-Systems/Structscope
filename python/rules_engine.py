@@ -100,13 +100,13 @@ def evaluate_rules(layout_result: dict, analysis_result: dict, platform_name: st
         rules.append(
             _rule(
                 "analysis.unresolved_type",
-                "warning",
+                "critical",
                 "analysis",
                 "One or more field types could not be resolved",
-                "Unresolved fields are treated as zero-size placeholders, so layout is incomplete.",
-                "Add the dependent type definition to the analyzed source or select a supported primitive/platform type.",
+                "The layout is incomplete because at least one field type is unresolved.",
+                "Add the dependent type definition to the analyzed source, use a supported primitive/platform type, or rerun with allow_incomplete only for non-authoritative inspection.",
                 fields=[str(field.get("name", "")) for field in unresolved_fields],
-                confidence="medium",
+                confidence="high",
             )
         )
 
@@ -115,13 +115,13 @@ def evaluate_rules(layout_result: dict, analysis_result: dict, platform_name: st
         rules.append(
             _rule(
                 "portability.bitfield_layout",
-                "info",
+                "warning",
                 "portability",
-                "Bit-field layout is implementation-defined",
+                "Bit-field layout requires compiler-specific packing rules",
                 f"{len(bit_fields)} bit-field member(s) were detected.",
-                "Verify target compiler bit-field packing rules when binary layout is externally visible.",
+                "StructScope refuses exact bit-field layouts by default; use allow_incomplete only for a partial view and verify with the target compiler.",
                 fields=[str(field.get("name", "")) for field in bit_fields],
-                confidence="medium",
+                confidence="high",
             )
         )
 
@@ -140,7 +140,7 @@ def evaluate_rules(layout_result: dict, analysis_result: dict, platform_name: st
             )
         )
 
-    score = _score(total_size, waste_ratio, savings, splits, unresolved_fields)
+    score = _score(total_size, waste_ratio, savings, splits, unresolved_fields, bit_fields)
     return {
         "score": score,
         "grade": _grade(score),
@@ -181,13 +181,14 @@ def _is_pointer_like(field: dict) -> bool:
     return "*" in raw_type or raw_type in {"pointer", "usize", "isize", "&"}
 
 
-def _score(total_size: int, waste_ratio: float, savings: int, splits: list, unresolved_fields: list) -> int:
+def _score(total_size: int, waste_ratio: float, savings: int, splits: list, unresolved_fields: list, bit_fields: list) -> int:
     score = 100
     score -= min(45, round(waste_ratio * 100))
     if savings > 0:
         score -= min(20, max(4, savings // 2))
     score -= min(20, len(splits) * 8)
     score -= min(20, len(unresolved_fields) * 10)
+    score -= min(25, len(bit_fields) * 12)
     if total_size >= 256:
         score -= 8
     elif total_size >= 128:
@@ -205,4 +206,3 @@ def _grade(score: int) -> str:
     if score >= 45:
         return "D"
     return "F"
-

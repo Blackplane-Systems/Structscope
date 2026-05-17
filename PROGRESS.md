@@ -412,3 +412,35 @@ DONE Packaged: D:\Vibe code\Structscope\structscope-0.1.0.vsix (17 files, 23.37 
 
 - VSIX verification: `structscope-0.1.0.vsix` exists and is non-zero bytes (`23929` bytes).
 - Final criteria: pytest 0 failures, integration test passed, TypeScript build clean, VSIX exists, completion rate 100.00%.
+
+## v3.1.0 Upgrade Summary
+
+Last updated: 2026-05-17 18:24:58 +05:30
+
+- Status: DONE
+- Version: 3.1.0
+- Scope:
+  - Added explicit Windows LLP64 ABI targets: `x86_64_windows` and `arm64_windows`.
+  - Added `riscv64` and improved host ABI detection notes.
+  - Made unresolved types and C/C++ bit-fields fail fast by default.
+  - Added `allow_incomplete` / `--allow-incomplete` for explicitly marked non-authoritative inspection.
+  - Expanded Rust primitive support to `char`, `i128`, and `u128`.
+  - Added source-model caveats for no preprocessor/include/multi-file resolution.
+  - Increased backend request timeout configurability and stderr retention.
+  - Added automatic Python backend restart on recoverable failures.
+  - Added `StructScope: Run CLI in Terminal` and a webview Analyze button.
+  - Updated README for professional v3.1 behavior and platform limitations.
+  - Fixed VSIX packaging to exclude `.venv/` and `venv/`.
+
+### v3.1.0 Verification
+
+- `pytest tests/ -v --tb=short`: 37 passed in 6.57s.
+- `python tests/test_server_integration.py`: Integration test PASSED.
+- `npx tsc --noEmit`: exit code 0.
+- `node --check webview/byteMap.js`: exit code 0.
+- `npx esbuild src/extension.ts --bundle --platform=node --external:vscode --outfile=out/extension.js`: produced `out/extension.js` at 26.2 KB.
+- Local C rule test: `TelemetryPacket` grade D, score 47, with padding, reorder, pointer-width, and small-field guidance.
+- Local C ABI comparison: `AbiLongDemo` differs between `x86_64` (32B) and `x86_64_windows` (24B).
+- Bit-field exact-layout test: `v3_unsupported_demo.c` fails fast by default and succeeds only with `--allow-incomplete`.
+- `npx @vscode/vsce package`: produced `struct-scope-3.1.0.vsix`, 20 files, 36.98 KB.
+- VSIX file check: `struct-scope-3.1.0.vsix` exists and is 37,867 bytes.

@@ -86,3 +86,21 @@ def test_pointer_struct_differs_between_x86_64_and_arm32():
     assert x86["total_size"] != arm32["total_size"]
     assert x86["total_size"] == 24
     assert arm32["total_size"] == 12
+
+
+def test_long_size_differs_between_unix_and_windows_64_bit_abis():
+    unix = PLATFORMS["x86_64"]
+    windows = PLATFORMS["x86_64_windows"]
+    assert unix["type_sizes"]["long"] == 8
+    assert windows["type_sizes"]["long"] == 4
+
+    unix_layout = compute_layout(
+        [{"name": "value", "type": "long", "size": unix["type_sizes"]["long"], "alignment": unix["type_alignments"]["long"]}],
+        unix,
+    )
+    windows_layout = compute_layout(
+        [{"name": "value", "type": "long", "size": windows["type_sizes"]["long"], "alignment": windows["type_alignments"]["long"]}],
+        windows,
+    )
+    assert unix_layout["total_size"] == 8
+    assert windows_layout["total_size"] == 4

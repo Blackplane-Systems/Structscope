@@ -29,6 +29,8 @@ type AnalysisField = {
   line?: number;
   offset?: number;
   padding_after?: number;
+  unresolved?: boolean;
+  bit_width?: number;
 };
 
 type LayoutResult = {
@@ -46,6 +48,11 @@ type AnalysisResult = {
   cache_line_splits: Array<{ field_name: string; offset: number; size: number; line_size: number }>;
   warnings: string[];
   optimal_order?: AnalysisField[];
+  layout_complete?: boolean;
+  blockers?: Array<{ kind: string; struct: string; field: string; message: string; line?: number }>;
+  rules?: Array<{ id: string; severity: string; title: string; message: string; recommendation: string; fields?: string[] }>;
+  layout_score?: number;
+  layout_grade?: string;
 };
 
 type AnalyseResponse = {
@@ -61,6 +68,8 @@ type DetectPlatformResponse = {
   machine?: string;
   system?: string;
   pointer_size?: number;
+  abi?: string;
+  warning?: string;
   source?: string;
   error?: string;
 };
@@ -78,6 +87,8 @@ type StructScopeSettings = {
   analyzeOnSave: boolean;
   autoOpenPanel: boolean;
   showStatusBar: boolean;
+  allowIncompleteLayouts: boolean;
+  requestTimeoutMs: number;
 };
 
 export class PythonServer {
@@ -85,9 +96,68 @@ export class PythonServer {
   private rl?: readline.Interface;
   private pending: PendingRequest[] = [];
   private stderrBuffer = '';
+  private pythonPath?: string;
+  private serverScript?: string;
+  private starting?: Promise<void>;
+  private disposed = false;
+  private readonly stderrLimit = 65536;
 
-  start(pythonPath: string, serverScript: string): Promise<void> {
-    return new Promise((resolve, reject) => {
+  async start(pythonPath: string, serverScript: string): Promise<void> {
+    this.pythonPath = pythonPath;
+    this.serverScript = serverScript;
+    this.disposed = false;
+    await this.startProcess();
+  }
+
+  async restart(): Promise<void> {
+    if (!this.pythonPath || !this.serverScript) {
+      throw new Error('Python server paths are not configured');
+    }
+    this.stopProcess(new Error('Python server restarting'));
+    await this.startProcess();
+  }
+
+  async send(request: object, timeoutMs = 15000): Promise<object> {
+    if (!this.isRunning()) {
+      await this.restart();
+    }
+
+    try {
+      return await this.sendOnce(request, timeoutMs);
+    } catch (error) {
+      if (this.isRecoverable(error)) {
+        await this.restart();
+        return this.sendOnce(request, timeoutMs);
+      }
+      throw error;
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.stopProcess(new Error('Python server disposed'));
+  }
+
+  private startProcess(): Promise<void> {
+    if (this.disposed) {
+      return Promise.reject(new Error('Python server is disposed'));
+    }
+    if (this.isRunning()) {
+      return Promise.resolve();
+    }
+    if (this.starting) {
+      return this.starting;
+    }
+    if (!this.pythonPath || !this.serverScript) {
+      return Promise.reject(new Error('Python server paths are not configured'));
+    }
+
+    const starting = new Promise<void>((resolve, reject) => {
+      const pythonPath = this.pythonPath!;
+      const serverScript = this.serverScript!;
+      this.stderrBuffer = '';
+      let settled = false;
+
       const proc = childProcess.spawn(pythonPath, [serverScript], {
         cwd: path.dirname(path.dirname(serverScript)),
         stdio: ['pipe', 'pipe', 'pipe']
@@ -95,60 +165,85 @@ export class PythonServer {
       this.proc = proc;
 
       const failStart = (error: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.proc = undefined;
         reject(error);
       };
 
       proc.once('error', failStart);
       proc.once('spawn', () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         proc.off('error', failStart);
         this.rl = readline.createInterface({ input: proc.stdout });
         this.rl.on('line', (line) => this.handleLine(line));
         proc.stderr.on('data', (chunk: Buffer) => {
           this.stderrBuffer += chunk.toString('utf8');
-          if (this.stderrBuffer.length > 8192) {
-            this.stderrBuffer = this.stderrBuffer.slice(-8192);
+          if (this.stderrBuffer.length > this.stderrLimit) {
+            this.stderrBuffer = this.stderrBuffer.slice(-this.stderrLimit);
           }
         });
-        proc.once('exit', (code, signal) => this.rejectAll(new Error(`Python server exited (${code ?? signal ?? 'unknown'}): ${this.stderrBuffer}`)));
+        proc.once('exit', (code, signal) => {
+          if (this.proc === proc) {
+            this.proc = undefined;
+            this.rl?.close();
+            this.rl = undefined;
+          }
+          this.rejectAll(new Error(`Python server exited (${code ?? signal ?? 'unknown'}): ${this.stderrBuffer}`));
+        });
         resolve();
       });
     });
+    this.starting = starting.finally(() => {
+      this.starting = undefined;
+    });
+    return this.starting;
   }
 
-  send(request: object): Promise<object> {
+  private sendOnce(request: object, timeoutMs: number): Promise<object> {
     if (!this.proc || !this.proc.stdin.writable) {
       return Promise.reject(new Error('Python server is not running'));
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        const index = this.pending.findIndex((entry) => entry.resolve === resolve);
-        if (index >= 0) {
-          this.pending.splice(index, 1);
-        }
-        reject(new Error(`Python server request timed out. stderr: ${this.stderrBuffer}`));
-      }, 5000);
-
-      this.pending.push({ resolve, reject, timeout });
+      const pending: PendingRequest = {
+        resolve,
+        reject,
+        timeout: setTimeout(() => {
+          this.removePending(pending);
+          reject(new Error(`Python server request timed out after ${timeoutMs}ms. stderr: ${this.stderrBuffer}`));
+        }, timeoutMs)
+      };
+      this.pending.push(pending);
       this.proc!.stdin.write(`${JSON.stringify(request)}\n`, 'utf8', (error) => {
         if (error) {
-          clearTimeout(timeout);
-          const index = this.pending.findIndex((entry) => entry.resolve === resolve);
-          if (index >= 0) {
-            this.pending.splice(index, 1);
-          }
+          this.removePending(pending);
           reject(error);
         }
       });
     });
   }
 
-  dispose(): void {
-    this.rejectAll(new Error('Python server disposed'));
+  private stopProcess(error: Error): void {
+    this.rejectAll(error);
     this.rl?.close();
     this.proc?.kill();
     this.proc = undefined;
     this.rl = undefined;
+  }
+
+  private isRunning(): boolean {
+    return Boolean(this.proc && !this.proc.killed && this.proc.stdin.writable);
+  }
+
+  private isRecoverable(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /not running|EPIPE|EINVAL|exited|disposed/i.test(message);
   }
 
   private handleLine(line: string): void {
@@ -170,6 +265,14 @@ export class PythonServer {
       entry.reject(error);
     }
   }
+
+  private removePending(entry: PendingRequest): void {
+    clearTimeout(entry.timeout);
+    const index = this.pending.indexOf(entry);
+    if (index >= 0) {
+      this.pending.splice(index, 1);
+    }
+  }
 }
 
 class StructScopeTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -188,6 +291,7 @@ class StructScopeTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem
     const items: vscode.TreeItem[] = [
       actionItem('Analyze Current File', 'structscope.analyzeStruct', 'play'),
       actionItem('Open Dashboard', 'structscope.openPanel', 'layout-panel'),
+      actionItem('Run CLI in Terminal', 'structscope.runCliInTerminal', 'terminal'),
       actionItem('Copy Last JSON', 'structscope.copyAnalysisJson', 'copy'),
       actionItem('Show Output Log', 'structscope.showOutput', 'output')
     ];
@@ -225,6 +329,7 @@ let lastStructName: string | undefined;
 let lastKnownStructs: StructAnalysis[] | undefined;
 let lastAnalysisJson: string | undefined;
 let selectionDebounce: NodeJS.Timeout | undefined;
+let activePythonPath = 'python';
 
 export async function activate(context: vscode.ExtensionContext) {
   outputChannel = vscode.window.createOutputChannel('StructScope');
@@ -244,6 +349,7 @@ export async function activate(context: vscode.ExtensionContext) {
     try {
       await server.start(pythonPath, serverScript);
       outputChannel.appendLine(`Started Python server with ${pythonPath}`);
+      activePythonPath = pythonPath;
       started = true;
       break;
     } catch (error) {
@@ -259,7 +365,7 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   try {
-    const ping = await server.send({ method: 'ping' });
+    const ping = await server.send({ method: 'ping' }, getSettings().requestTimeoutMs);
     outputChannel.appendLine(`Ping response: ${JSON.stringify(ping)}`);
   } catch (error) {
     outputChannel.appendLine(`Ping failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -283,6 +389,9 @@ export async function activate(context: vscode.ExtensionContext) {
       } else {
         await rerunLastAnalysis(context, server);
       }
+    }),
+    vscode.commands.registerCommand('structscope.runCliInTerminal', () => {
+      runCliInTerminal(context);
     }),
     vscode.commands.registerCommand('structscope.copyAnalysisJson', async () => {
       if (!lastAnalysisJson) {
@@ -358,7 +467,9 @@ function getSettings(): StructScopeSettings {
     cacheLine: config.get<number>('cacheLine', 64),
     analyzeOnSave: config.get<boolean>('analyzeOnSave', true),
     autoOpenPanel: config.get<boolean>('autoOpenPanel', true),
-    showStatusBar: config.get<boolean>('showStatusBar', true)
+    showStatusBar: config.get<boolean>('showStatusBar', true),
+    allowIncompleteLayouts: config.get<boolean>('allowIncompleteLayouts', false),
+    requestTimeoutMs: Math.max(1000, config.get<number>('requestTimeoutMs', 15000))
   };
 }
 
@@ -376,12 +487,17 @@ async function applyConfiguredDefaults(server: PythonServer): Promise<void> {
 }
 
 async function detectPlatform(server: PythonServer): Promise<string> {
-  const response = (await server.send({ method: 'detect_platform' })) as DetectPlatformResponse;
+  const response = (await server.send({ method: 'detect_platform' }, getSettings().requestTimeoutMs)) as DetectPlatformResponse;
   if (response.error) {
     throw new Error(response.error);
   }
   const platform = response.platform || 'x86_64';
-  outputChannel?.appendLine(`Detected host platform: ${platform} (${response.system || 'unknown'} ${response.machine || 'unknown'}, pointer=${response.pointer_size || '?'}B)`);
+  outputChannel?.appendLine(
+    `Detected host platform: ${platform} (${response.system || 'unknown'} ${response.machine || 'unknown'}, pointer=${response.pointer_size || '?'}B, abi=${response.abi || '?'})`
+  );
+  if (response.warning) {
+    outputChannel?.appendLine(`Detection note: ${response.warning}`);
+  }
   return platform;
 }
 
@@ -439,6 +555,9 @@ export function openStructScopePanel(context: vscode.ExtensionContext, server: P
         treeProvider?.refresh();
         await rerunLastAnalysis(context, server);
       }
+    }
+    if (message?.type === 'analyze-active') {
+      await analyzeActiveDocument(context, server);
     }
   });
   panel.onDidDispose(() => {
@@ -545,6 +664,50 @@ async function analyzeSavedDocument(
   );
 }
 
+function runCliInTerminal(context: vscode.ExtensionContext): void {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showErrorMessage('No active editor to analyze with StructScope CLI.');
+    return;
+  }
+  const language = languageFromDocument(editor.document);
+  if (!language) {
+    vscode.window.showInformationMessage('StructScope supports C, C++, and Rust.');
+    return;
+  }
+  if (editor.document.isUntitled || editor.document.uri.scheme !== 'file') {
+    vscode.window.showErrorMessage('Save the file before running StructScope CLI in a terminal.');
+    return;
+  }
+
+  const cliScript = context.asAbsolutePath(path.join('python', 'cli.py'));
+  const args = [
+    quoteShell(activePythonPath),
+    quoteShell(cliScript),
+    quoteShell(editor.document.uri.fsPath),
+    '--language',
+    language,
+    '--platform',
+    selectedPlatform,
+    '--cache-line',
+    String(selectedCacheLine)
+  ];
+  if (getSettings().allowIncompleteLayouts) {
+    args.push('--allow-incomplete');
+  }
+
+  const terminal = vscode.window.createTerminal({ name: 'StructScope CLI' });
+  terminal.sendText(args.join(' '));
+  terminal.show();
+}
+
+function quoteShell(value: string): string {
+  if (process.platform === 'win32') {
+    return `"${value.replace(/"/g, '\\"')}"`;
+  }
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 async function rerunLastAnalysis(context: vscode.ExtensionContext, server: PythonServer): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (editor) {
@@ -575,12 +738,13 @@ async function runAnalysis(
     source: analysisContext.source,
     language: analysisContext.language,
     platform: selectedPlatform,
-    cache_line: selectedCacheLine
+    cache_line: selectedCacheLine,
+    allow_incomplete: getSettings().allowIncompleteLayouts
   };
 
   let response: AnalyseResponse;
   try {
-    response = (await server.send(request)) as AnalyseResponse;
+    response = (await server.send(request, getSettings().requestTimeoutMs)) as AnalyseResponse;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     outputChannel?.appendLine(`Analysis request failed: ${message}`);
@@ -713,6 +877,16 @@ function updateDiagnostics(document: vscode.TextDocument, structs: StructAnalysi
         new vscode.Diagnostic(
           rangeForLine(document, field?.line ?? struct.line),
           'This field straddles a cache line boundary',
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
+    for (const blocker of struct.analysis?.blockers || []) {
+      diagnostics.push(
+        new vscode.Diagnostic(
+          rangeForLine(document, blocker.line ?? struct.line),
+          `StructScope exact layout unavailable: ${blocker.message}`,
           vscode.DiagnosticSeverity.Warning
         )
       );

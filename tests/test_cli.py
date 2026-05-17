@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 FIXTURE = Path("tests/fixtures/v2_local_demo.c")
+ABI_FIXTURE = Path("tests/fixtures/v3_abi_demo.c")
 
 
 def test_cli_json_analyzes_local_c_file():
@@ -84,6 +85,27 @@ def test_cli_compare_outputs_platform_summary():
     assert "arm32" in result.stdout
 
 
+def test_cli_compare_shows_windows_llp64_difference_for_long():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "python/cli.py",
+            str(ABI_FIXTURE),
+            "--compare",
+            "x86_64",
+            "x86_64_windows",
+            "--struct",
+            "AbiLongDemo",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "x86_64_windows" in result.stdout
+    assert "AbiLongDemo" in result.stdout
+    assert "min=" in result.stdout and "max=" in result.stdout
+
+
 def test_cli_markdown_report_contains_guidance():
     result = subprocess.run(
         [
@@ -102,3 +124,29 @@ def test_cli_markdown_report_contains_guidance():
     )
     assert "# StructScope Report" in result.stdout
     assert "Rule-based guidance" in result.stdout
+
+
+def test_cli_fails_fast_for_unresolved_types(tmp_path):
+    source = tmp_path / "bad.c"
+    source.write_text("struct Bad { MissingType value; int count; };", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "python/cli.py", str(source), "--platform", "x86_64"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2
+    assert "Exact layout unavailable" in result.stderr
+
+
+def test_cli_allow_incomplete_outputs_partial_json(tmp_path):
+    source = tmp_path / "bad.c"
+    source.write_text("struct Bad { MissingType value; int count; };", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "python/cli.py", str(source), "--platform", "x86_64", "--allow-incomplete", "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+    assert payload["layout_complete"] is False
+    assert payload["structs"][0]["analysis"]["layout_complete"] is False
