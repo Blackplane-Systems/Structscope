@@ -6,6 +6,7 @@ from pathlib import Path
 
 FIXTURE = Path("tests/fixtures/v2_local_demo.c")
 ABI_FIXTURE = Path("tests/fixtures/v3_abi_demo.c")
+TESTING_FIXTURE = Path("tests/fixtures/testing_layout.c")
 
 
 def test_cli_json_analyzes_local_c_file():
@@ -21,6 +22,26 @@ def test_cli_json_analyzes_local_c_file():
     assert structs["TelemetryPacket"]["analysis"]["waste_bytes"] > 0
     assert structs["TelemetryPacket"]["layout"]["total_size"] == 40
     assert structs["CacheSplitDemo"]["analysis"]["cache_line_splits"]
+
+
+def test_cli_analyzes_testing_layout_offsets_and_padding():
+    result = subprocess.run(
+        [sys.executable, "python/cli.py", str(TESTING_FIXTURE), "--platform", "x86_64", "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+    test_layout = {item["name"]: item for item in payload["structs"]}["TestLayout"]
+    fields = {field["name"]: field for field in test_layout["layout"]["fields"]}
+    assert test_layout["layout"]["total_size"] == 40
+    assert test_layout["analysis"]["waste_bytes"] == 17
+    assert test_layout["analysis"]["savings"] == 16
+    assert fields["a"]["offset"] == 0 and fields["a"]["padding_after"] == 7
+    assert fields["b"]["offset"] == 8
+    assert fields["c"]["offset"] == 16 and fields["c"]["padding_after"] == 4
+    assert fields["d"]["offset"] == 24
+    assert fields["e"]["offset"] == 32
 
 
 def test_cli_table_can_filter_struct_by_name():

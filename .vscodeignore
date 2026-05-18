@@ -13,3 +13,4 @@ PROGRESS.md
 package-lock.json
 *.vsix
 .gitignore
+testing.c

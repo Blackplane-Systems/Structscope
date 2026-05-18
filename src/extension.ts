@@ -89,6 +89,7 @@ type StructScopeSettings = {
   showStatusBar: boolean;
   allowIncompleteLayouts: boolean;
   requestTimeoutMs: number;
+  autoInstallPythonDeps: boolean;
 };
 
 export class PythonServer {
@@ -341,12 +342,43 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const server = new PythonServer();
   const serverScript = context.asAbsolutePath(path.join('python', 'server.py'));
+  const requirementsPath = context.asAbsolutePath(path.join('python', 'requirements.txt'));
   const pythonCandidates = getPythonCandidates();
+
+  // Register commands immediately so UI interactions don't say "command not found"
+  context.subscriptions.push(
+    vscode.commands.registerCommand('structscope.analyzeStruct', async () => {
+      await analyzeActiveDocument(context, server);
+    }),
+    vscode.commands.registerCommand('structscope.openPanel', async () => {
+      openStructScopePanel(context, server);
+      if (vscode.window.activeTextEditor && languageFromDocument(vscode.window.activeTextEditor.document)) {
+        await analyzeActiveDocument(context, server);
+      } else {
+        await rerunLastAnalysis(context, server);
+      }
+    }),
+    vscode.commands.registerCommand('structscope.runCliInTerminal', () => {
+      runCliInTerminal(context);
+    }),
+    vscode.commands.registerCommand('structscope.copyAnalysisJson', async () => {
+      if (!lastAnalysisJson) {
+        vscode.window.showInformationMessage('No StructScope analysis has run yet.');
+        return;
+      }
+      await vscode.env.clipboard.writeText(lastAnalysisJson);
+      vscode.window.showInformationMessage('StructScope analysis JSON copied.');
+    }),
+    vscode.commands.registerCommand('structscope.showOutput', () => {
+      outputChannel?.show(true);
+    })
+  );
 
   let started = false;
   const errors: string[] = [];
   for (const pythonPath of pythonCandidates) {
     try {
+      await ensurePythonDependencies(pythonPath, requirementsPath);
       await server.start(pythonPath, serverScript);
       outputChannel.appendLine(`Started Python server with ${pythonPath}`);
       activePythonPath = pythonPath;
@@ -379,31 +411,6 @@ export async function activate(context: vscode.ExtensionContext) {
   updateStatusBar();
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('structscope.analyzeStruct', async () => {
-      await analyzeActiveDocument(context, server);
-    }),
-    vscode.commands.registerCommand('structscope.openPanel', async () => {
-      openStructScopePanel(context, server);
-      if (vscode.window.activeTextEditor && languageFromDocument(vscode.window.activeTextEditor.document)) {
-        await analyzeActiveDocument(context, server);
-      } else {
-        await rerunLastAnalysis(context, server);
-      }
-    }),
-    vscode.commands.registerCommand('structscope.runCliInTerminal', () => {
-      runCliInTerminal(context);
-    }),
-    vscode.commands.registerCommand('structscope.copyAnalysisJson', async () => {
-      if (!lastAnalysisJson) {
-        vscode.window.showInformationMessage('No StructScope analysis has run yet.');
-        return;
-      }
-      await vscode.env.clipboard.writeText(lastAnalysisJson);
-      vscode.window.showInformationMessage('StructScope analysis JSON copied.');
-    }),
-    vscode.commands.registerCommand('structscope.showOutput', () => {
-      outputChannel?.show(true);
-    }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       void analyzeSavedDocument(context, server, document);
     }),
@@ -469,7 +476,8 @@ function getSettings(): StructScopeSettings {
     autoOpenPanel: config.get<boolean>('autoOpenPanel', true),
     showStatusBar: config.get<boolean>('showStatusBar', true),
     allowIncompleteLayouts: config.get<boolean>('allowIncompleteLayouts', false),
-    requestTimeoutMs: Math.max(1000, config.get<number>('requestTimeoutMs', 15000))
+    requestTimeoutMs: Math.max(1000, config.get<number>('requestTimeoutMs', 15000)),
+    autoInstallPythonDeps: config.get<boolean>('autoInstallPythonDeps', true)
   };
 }
 
@@ -477,8 +485,14 @@ async function applyConfiguredDefaults(server: PythonServer): Promise<void> {
   const settings = getSettings();
   selectedCacheLine = settings.cacheLine;
   if (settings.defaultPlatform === 'auto') {
-    selectedPlatform = await detectPlatform(server);
-    detectedPlatformLabel = 'auto';
+    try {
+      selectedPlatform = await detectPlatform(server);
+      detectedPlatformLabel = 'auto';
+    } catch (error) {
+      selectedPlatform = 'x86_64';
+      detectedPlatformLabel = 'fallback';
+      outputChannel?.appendLine(`Host ABI detection failed, falling back to x86_64: ${error instanceof Error ? error.message : String(error)}`);
+    }
   } else {
     selectedPlatform = settings.defaultPlatform;
     detectedPlatformLabel = '';
@@ -499,6 +513,66 @@ async function detectPlatform(server: PythonServer): Promise<string> {
     outputChannel?.appendLine(`Detection note: ${response.warning}`);
   }
   return platform;
+}
+
+async function ensurePythonDependencies(pythonPath: string, requirementsPath: string): Promise<void> {
+  const check = await checkPythonDependencies(pythonPath);
+  if (check.ok) {
+    outputChannel?.appendLine(`Python dependency check passed for ${pythonPath}`);
+    return;
+  }
+
+  const settings = getSettings();
+  const installHint = `${pythonPath} -m pip install -r ${requirementsPath}`;
+  if (!settings.autoInstallPythonDeps) {
+    throw new Error(`Missing Python dependencies for ${pythonPath}. Run: ${installHint}. Details: ${check.output}`);
+  }
+
+  outputChannel?.appendLine(`Python dependencies missing for ${pythonPath}; running pip install.`);
+  outputChannel?.appendLine(check.output);
+  await execFileChecked(pythonPath, ['-m', 'pip', 'install', '-r', requirementsPath], 180000);
+  const recheck = await checkPythonDependencies(pythonPath);
+  if (!recheck.ok) {
+    throw new Error(`Python dependency installation completed but imports still fail. Details: ${recheck.output}`);
+  }
+  outputChannel?.appendLine(`Python dependencies installed for ${pythonPath}`);
+}
+
+async function checkPythonDependencies(pythonPath: string): Promise<{ ok: boolean; output: string }> {
+  const code = [
+    'import tree_sitter',
+    'import tree_sitter_c',
+    'import tree_sitter_cpp',
+    'import tree_sitter_rust',
+    'print("ok")'
+  ].join('; ');
+  try {
+    const output = await execFileChecked(pythonPath, ['-c', code], 30000);
+    return { ok: true, output };
+  } catch (error) {
+    return { ok: false, output: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function execFileChecked(command: string, args: string[], timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    childProcess.execFile(
+      command,
+      args,
+      {
+        timeout: timeoutMs,
+        maxBuffer: 1024 * 1024
+      },
+      (error, stdout, stderr) => {
+        const output = `${stdout || ''}${stderr || ''}`.trim();
+        if (error) {
+          reject(new Error(output || error.message));
+          return;
+        }
+        resolve(output);
+      }
+    );
+  });
 }
 
 function updateStatusBar(): void {

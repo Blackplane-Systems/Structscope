@@ -6,34 +6,29 @@ The project is designed for systems programming, embedded development, performan
 
 ## Capabilities
 
-- Static analysis for C structs, C++ structs/classes with data members, and Rust structs
-- ABI-aware layout computation for Unix-like LP64, Windows LLP64, 32-bit, embedded, and RISC-V targets
-- Host Python ABI auto-detection with manual target-platform override for compiler and cross-compilation targets
-- Visual byte map with field regions, padding cells, and cache-line boundaries
-- Field table with offsets, sizes, padding-after values, and cache-line notes
-- Rule-based, local-only improvement guidance with severity, confidence, and safe recommendations
-- Layout score and grade for quick prioritization
-- Greedy field reorder suggestions with expected byte savings
-- Platform comparison reports for pointer-width and ABI-sensitive structures
-- VS Code diagnostics for padding hotspots, high-waste structs, and cache-line split fields
-- Analyze-on-save workflow with optional automatic dashboard opening
-- Activity Bar dashboard, status bar command, editor title actions, context menu actions, webview Analyze button, and Command Palette commands
-- Terminal CLI for scripting, CI checks, JSON output, Markdown reports, and platform comparison
+- Static analysis for C structs, C++ structs/classes with data members, and Rust structs.
+- ABI-aware layout computation for Unix-like LP64, Windows LLP64, 32-bit, embedded, and RISC-V targets.
+- Host Python ABI detection with manual target-platform override for compiler and cross-compilation targets.
+- Visual byte map with field regions, padding cells, cache-line boundaries, field table, metrics, and reorder suggestions.
+- Rule-based, local-only improvement guidance with severity, confidence, and safe recommendations.
+- VS Code diagnostics for padding hotspots, high-waste structs, incomplete layouts, and cache-line split fields.
+- Analyze-on-save workflow with optional automatic dashboard opening.
+- Activity Bar dashboard, status bar command, editor title actions, context menu actions, webview Analyze button, and Command Palette commands.
+- Terminal CLI for scripting, CI checks, JSON output, Markdown reports, and platform comparison.
 
 ## Safety Model
 
-Struct Scope provides rule-based suggestions only. It does not rewrite source code automatically, execute generated code, fetch remote rules, or call model APIs. Every recommendation is returned with `safe: true` and `auto_apply: false`; the user remains responsible for deciding whether a layout change is compatible with ABI, serialization, protocol, or public API requirements.
+Struct Scope provides rule-based suggestions only. It does not rewrite source code automatically, execute generated code, fetch remote rules, or call model APIs. Recommendations are returned with `safe: true` and `auto_apply: false`; users remain responsible for deciding whether a layout change is compatible with ABI, serialization, protocol, or public API requirements.
 
 Exact analysis fails fast by default when a field type cannot be resolved or a C/C++ bit-field would require compiler-specific packing rules. Partial inspection is available through the `--allow-incomplete` CLI flag or `structscope.allowIncompleteLayouts`, but those results are explicitly marked non-authoritative.
 
 ## Requirements
 
-- Visual Studio Code 1.85 or newer
-- Python 3.8 or newer
-- `pip`
-- Node.js and npm for development, testing, or packaging
+- Visual Studio Code 1.85 or newer.
+- Python 3.8 or newer.
+- Node.js and npm for development, testing, or packaging.
 
-Install Python dependencies:
+The extension checks for its Python parser dependencies on activation. If `tree-sitter` packages are missing and `structscope.autoInstallPythonDeps` is enabled, Struct Scope runs `python -m pip install -r python/requirements.txt` for the selected Python executable. Environments without network access can install dependencies manually:
 
 ```sh
 pip install -r python/requirements.txt
@@ -43,13 +38,14 @@ pip install -r python/requirements.txt
 
 Open a supported C, C++, header, or Rust source file. Struct Scope can be invoked through:
 
-- File save when `structscope.analyzeOnSave` is enabled
-- `StructScope: Analyze Struct` from the Command Palette
-- `Ctrl+Shift+M` on Windows/Linux or `Cmd+Shift+M` on macOS
-- The Struct Scope status bar item
-- The editor title action or editor context menu
-- The Struct Scope Activity Bar dashboard
-- `StructScope: Run CLI in Terminal`, which opens a VS Code terminal and runs the local CLI against the active file
+- `StructScope: Analyze Struct` from the Command Palette.
+- `Ctrl+Shift+M` on Windows/Linux or `Cmd+Shift+M` on macOS.
+- The Struct Scope status bar item.
+- The editor title action or editor context menu.
+- The Struct Scope Activity Bar dashboard.
+- The webview `Analyze` button.
+- `StructScope: Run CLI in Terminal`, which opens a VS Code terminal and runs the local CLI against the active file.
+- File save when `structscope.analyzeOnSave` is enabled.
 
 The dashboard renders the selected structure as a byte map, field table, metrics panel, rule insights panel, cache-line ruler, and reorder suggestion panel. The platform selector can be changed manually. The Detect control re-runs host ABI detection and refreshes the layout.
 
@@ -59,6 +55,12 @@ Analyze a source file:
 
 ```sh
 python python/cli.py tests/fixtures/v2_local_demo.c --platform x86_64
+```
+
+Analyze a local file and print JSON:
+
+```sh
+python python/cli.py testing.c --platform x86_64 --json
 ```
 
 Filter output to one struct:
@@ -76,7 +78,7 @@ python python/cli.py tests/fixtures/v2_local_demo.c --platform x86_64 --struct T
 Compare target platforms:
 
 ```sh
-python python/cli.py tests/fixtures/v2_local_demo.c --compare x86_64 x86_64_windows arm32
+python python/cli.py tests/fixtures/v3_abi_demo.c --compare x86_64 x86_64_windows --struct AbiLongDemo
 ```
 
 Emit JSON or Markdown reports:
@@ -92,14 +94,6 @@ Inspect a partial, non-authoritative layout when unsupported fields are present:
 python python/cli.py path/to/file.c --allow-incomplete --json
 ```
 
-Example local C output:
-
-```text
-TelemetryPacket: total=40B padding=18B (45.0%) optimal=24B savings=16B
-CacheSplitDemo: total=68B padding=0B (0.0%) optimal=68B savings=0B
-warning: Field value straddles cache line boundary
-```
-
 ## Configuration
 
 | Setting | Description |
@@ -112,14 +106,15 @@ warning: Field value straddles cache line boundary
 | `structscope.showStatusBar` | Shows or hides the Struct Scope status bar command |
 | `structscope.allowIncompleteLayouts` | Allows non-authoritative partial layouts for unresolved types or bit-fields. Disabled by default |
 | `structscope.requestTimeoutMs` | Python backend request timeout in milliseconds. Default: 15000 |
+| `structscope.autoInstallPythonDeps` | Installs missing Python parser dependencies automatically. Enabled by default |
 
 ## Supported Inputs
 
 Languages:
 
-- C structs
-- C++ structs and classes with data members
-- Rust structs
+- C structs.
+- C++ structs and classes with data members.
+- Rust structs.
 
 ABI platforms:
 
@@ -138,22 +133,14 @@ Struct Scope analyzes source text as provided to tree-sitter. It does not run th
 
 C/C++ bit-fields are detected and reported as unsupported for exact layout because packing depends on compiler, target, declaration type, and flags. Use the target compiler as the source of truth for externally visible bit-field layouts.
 
-## Architecture
-
-Struct Scope is split into a TypeScript VS Code extension and a Python analysis backend.
-
-- `src/extension.ts` manages VS Code commands, diagnostics, status bar state, Activity Bar entries, the webview, and the Python child process.
-- `python/server.py` exposes newline-delimited JSON-RPC over stdio.
-- `python/cli.py` provides terminal access to the same analysis pipeline.
-- `python/parser_c.py` and `python/parser_rust.py` extract structure definitions with tree-sitter.
-- `python/layout_engine.py` computes ABI layout with deterministic alignment arithmetic.
-- `python/analyser.py` and `python/rules_engine.py` compute waste, cache-line risks, layout grade, and safe guidance.
-- `python/platforms.py` contains ABI tables and host platform detection.
-- `webview/` contains the local dashboard UI assets.
-
-No source code is sent to cloud services, telemetry endpoints, compiler services, third-party analysis systems, or model APIs.
-
 ## Development
+
+Install dependencies:
+
+```sh
+npm install
+pip install -r python/requirements.txt
+```
 
 Run tests:
 
@@ -165,17 +152,17 @@ python tests/test_server_integration.py
 Run TypeScript checks and build:
 
 ```sh
-npx tsc --noEmit
-npx esbuild src/extension.ts --bundle --platform=node --external:vscode --outfile=out/extension.js
+npm run compile
+npm run build
 ```
-
-The test suite includes backend arithmetic, parser coverage, CLI behavior, server integration, static checks for save/selection-triggered VS Code wiring, and static checks for dashboard controls. Manual VS Code smoke testing is still useful before publishing a release, but the expected entry points are covered by automated repository checks.
 
 Package the extension:
 
 ```sh
-npx @vscode/vsce package
+npm run package
 ```
+
+The test suite includes backend arithmetic, parser coverage, CLI behavior, server integration, manifest checks, static checks for save/selection-triggered VS Code wiring, and static checks for dashboard controls. Manual VS Code smoke testing is still useful before publishing a release, but the expected entry points are covered by automated repository checks.
 
 ## License
 

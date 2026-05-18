@@ -444,3 +444,33 @@ Last updated: 2026-05-17 18:24:58 +05:30
 - Bit-field exact-layout test: `v3_unsupported_demo.c` fails fast by default and succeeds only with `--allow-incomplete`.
 - `npx @vscode/vsce package`: produced `struct-scope-3.1.0.vsix`, 20 files, 36.98 KB.
 - VSIX file check: `struct-scope-3.1.0.vsix` exists and is 37,867 bytes.
+
+## v3.1.2 Stabilization Summary
+
+Last updated: 2026-05-19 01:00:26 +05:30
+
+- Status: DONE
+- Version: 3.1.2
+- Reason: 3.1.1 regressed the extension manifest, removed most UI entry points/settings, left TypeScript uncompilable, and produced a VSIX that could include scratch source files.
+- Fixes:
+  - Restored full VS Code manifest contributions: Activity Bar view, editor title actions, context menu actions, view title actions, keybinding, CLI command, output command, and runtime settings.
+  - Fixed TypeScript compile break in the open-panel command path.
+  - Fixed `Copy Last Analysis JSON` to copy the JSON payload instead of JSON-stringifying an already serialized string.
+  - Added Python dependency bootstrap: the extension checks tree-sitter imports and can run `python -m pip install -r python/requirements.txt` when dependencies are missing.
+  - Added safer fallback if host ABI detection fails.
+  - Added `@vscode/vsce` as a dev dependency so `npm run package` works from a clean repo install.
+  - Rewrote README to remove broken install commands and document current runtime behavior.
+  - Excluded top-level `testing.c` scratch files from git and VSIX packaging.
+  - Added a tracked `testing_layout.c` fixture matching the local C smoke test.
+
+### v3.1.2 Verification
+
+- `pytest tests/ -v --tb=short`: 42 passed in 10.18s.
+- `python tests/test_server_integration.py`: Integration test PASSED.
+- `npm run compile`: exit code 0.
+- `npm run build`: produced `out/extension.js` at 28.6 KB.
+- `node --check webview/byteMap.js`: exit code 0.
+- Local C test: `python python/cli.py testing.c --platform x86_64 --struct TestLayout` returned `total=40B`, `padding=17B`, offsets `a=0`, `b=8`, `c=16`, `d=24`, `e=32`, and `savings=16B`.
+- Local C platform comparison: `TestLayout` reports `x86_64=40B`, `x86_64_windows=40B`, `arm32=32B`.
+- `npm run package`: produced `struct-scope-3.1.2.vsix`, 20 files, 37.21 KB.
+- VSIX file check: `struct-scope-3.1.2.vsix` exists and is 38,107 bytes.

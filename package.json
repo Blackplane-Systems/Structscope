@@ -2,7 +2,7 @@
   "name": "struct-scope",
   "displayName": "Struct Scope",
   "publisher": "BlackplaneSystems",
-  "version": "3.1.0",
+  "version": "3.1.2",
   "description": "Visualize C, C++, and Rust struct memory layout, padding, cache-line splits, and reorder suggestions.",
   "author": {
     "name": "Brahadeesh V Ra",
@@ -21,10 +21,15 @@
     "Visualization"
   ],
   "activationEvents": [
-    "onStartupFinished",
     "onLanguage:c",
     "onLanguage:cpp",
-    "onLanguage:rust"
+    "onLanguage:rust",
+    "onView:structscope.dashboard",
+    "onCommand:structscope.analyzeStruct",
+    "onCommand:structscope.openPanel",
+    "onCommand:structscope.runCliInTerminal",
+    "onCommand:structscope.copyAnalysisJson",
+    "onCommand:structscope.showOutput"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -193,6 +198,11 @@
           "minimum": 1000,
           "maximum": 120000,
           "description": "Timeout in milliseconds for each Python backend request."
+        },
+        "structscope.autoInstallPythonDeps": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically install StructScope Python parser dependencies with pip when they are missing."
         }
       }
     }
@@ -200,6 +210,7 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.27.0",
     "typescript": "^5.4.0"
   }

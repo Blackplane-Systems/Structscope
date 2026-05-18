@@ -5,6 +5,7 @@ python/__pycache__/
 tests/__pycache__/
 python/*.pyc
 *.vsix
+/testing.c
 .venv/
 venv/
 dist/
